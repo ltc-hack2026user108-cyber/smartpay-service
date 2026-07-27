@@ -38,4 +38,37 @@ export class OrdersService {
     }
     return doc.data() as CreateOrderDto;
   }
+
+  async findByBuyer(buyerId: string): Promise<CreateOrderDto[]> {
+    const db = this.firestoreProvider.getDb();
+    const snapshot = await db.collection(this.collection).where('buyer.id', '==', buyerId).get();
+    if (snapshot.empty) {
+      throw new NotFoundException(`No orders found for buyer ${buyerId}`);
+    }
+    return snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
+  }
+
+  async findBySeller(sellerId: string): Promise<CreateOrderDto[]> {
+    const db = this.firestoreProvider.getDb();
+    const snapshot = await db.collection(this.collection).where('seller.id', '==', sellerId).get();
+    if (snapshot.empty) {
+      throw new NotFoundException(`No orders found for seller ${sellerId}`);
+    }
+    return snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
+  }
+
+  async updateOrderStatus(id: string, status: 'ACCEPTED' | 'DECLINED'): Promise<{ message: string; orderId: string; orderStatus: string }> {
+    const db = this.firestoreProvider.getDb();
+    const docRef = db.collection(this.collection).doc(id);
+
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      throw new NotFoundException(`Order ${id} not found`);
+    }
+
+    await docRef.update({ orderStatus: status, updatedAt: new Date().toISOString() });
+    this.logger.log(`Order ${id} status updated to ${status}`);
+
+    return { message: `Order ${status.toLowerCase()} successfully`, orderId: id, orderStatus: status };
+  }
 }

@@ -17,6 +17,26 @@ export class OrdersController {
     return this.ordersService.findAll();
   }
 
+  @Get('buyers/:buyerId')
+  async findByBuyer(@Param('buyerId') buyerId: string) {
+    return this.ordersService.findByBuyer(buyerId);
+  }
+
+  @Get('sellers/:sellerId')
+  async findBySeller(@Param('sellerId') sellerId: string) {
+    return this.ordersService.findBySeller(sellerId);
+  }
+
+  @Post(':id/accept')
+  async acceptOrder(@Param('id') id: string) {
+    return this.ordersService.updateOrderStatus(id, 'ACCEPTED');
+  }
+
+  @Post(':id/decline')
+  async declineOrder(@Param('id') id: string) {
+    return this.ordersService.updateOrderStatus(id, 'DECLINED');
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.ordersService.findOne(id);
