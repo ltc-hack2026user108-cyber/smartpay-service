@@ -1,7 +1,7 @@
 import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { Firestore } from 'firebase-admin/firestore';
-import * as serviceAccount from '../../smartpay-backend-key.json';
+import * as serviceAccount from '../smartpay-backend-key.json';
 
 @Injectable()
 export class FirestoreProvider implements OnApplicationBootstrap {
