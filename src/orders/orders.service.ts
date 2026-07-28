@@ -45,7 +45,7 @@ export class OrdersService {
 
     // Trigger GCUL smart contract createOrder (Buyer -> Escrow transfer)
     try {
-      const buyerAccountId: string = dto.buyer?.gculAccountId ?? dto.buyer?.id ?? process.env.GCUL_BUYER_ACCOUNT_ID ?? '';
+      const buyerAccountId: string = dto.buyer?.gculAccountId ?? process.env.GCUL_BUYER_ACCOUNT_ID ?? '';
       if (buyerAccountId) {
         await this.gculService.createOrder(dto._id, buyerAccountId, dto.amount);
       }
