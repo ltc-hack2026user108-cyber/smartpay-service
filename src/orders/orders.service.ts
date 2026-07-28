@@ -57,24 +57,29 @@ export class OrdersService {
     return snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
   }
 
-  async getBuyerDashboard(buyerId: string): Promise<{ activeOrders: number; deliveredOrders: number; incompleteOrders: number }> {
+  async getBuyerDashboard(buyerId: string): Promise<{ activeOrders: number; deliveredOrders: number; incompleteOrders: number; availableBalance: number }> {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection).where('buyer.id', '==', buyerId).get();
-
+    console.log('snapshot empty', snapshot);
     if (snapshot.empty) {
       throw new NotFoundException(`No orders found for buyer ${buyerId}`);
     }
 
     const orders = snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
-
+    console.log('orders', orders);
     const activeStatuses = ['ORDER_CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
     const deliveredStatuses = ['DELIVERED'];
     const incompleteStatuses = ['REFUNDED','DECLINED', 'FAILED'];
+
+    const availableBalance = orders
+      .filter((o) => !activeStatuses.includes(o.orderStatus))
+      .reduce((sum, o) => sum + o.amount, 0);
 
     return {
       activeOrders: orders.filter((o) => activeStatuses.includes(o.orderStatus)).length,
       deliveredOrders: orders.filter((o) => deliveredStatuses.includes(o.orderStatus)).length,
       incompleteOrders: orders.filter((o) => incompleteStatuses.includes(o.orderStatus)).length,
+      availableBalance,
     };
   }
 
