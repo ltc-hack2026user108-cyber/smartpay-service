@@ -22,6 +22,11 @@ export class OrdersController {
     return this.ordersService.findByBuyer(buyerId);
   }
 
+  @Get('buyers/:buyerId/dashboard')
+  async getBuyerDashboard(@Param('buyerId') buyerId: string) {
+    return this.ordersService.getBuyerDashboard(buyerId);
+  }
+
   @Get('sellers/:sellerId')
   async findBySeller(@Param('sellerId') sellerId: string) {
     return this.ordersService.findBySeller(sellerId);
