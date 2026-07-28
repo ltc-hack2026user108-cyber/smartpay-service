@@ -202,4 +202,66 @@ export class OrdersService {
       status: o.orderStatus,
     }));
   }
+
+  async getBuyerOngoingOrders(buyerId: string): Promise<{ orderId: string; sellerName: string; description: string; amount: number; deliveryDate: string; status: string }[]> {
+    const db = this.firestoreProvider.getDb();
+    const ongoingStatuses = ['ORDER_CREATED', 'IN_TRANSIT', 'SHIPPED'];
+
+    const snapshots = await Promise.all(
+      ongoingStatuses.map((status) =>
+        db.collection(this.collection)
+          .where('buyer.id', '==', buyerId)
+          .where('orderStatus', '==', status)
+          .get()
+      )
+    );
+
+    const orders = snapshots.flatMap((snapshot) =>
+      snapshot.docs.map((doc) => doc.data() as CreateOrderDto)
+    );
+
+    if (!orders.length) {
+      throw new NotFoundException(`No ongoing orders found for buyer ${buyerId}`);
+    }
+
+    return orders.map((o) => ({
+      orderId: o._id,
+      sellerName: o.seller.name,
+      description: o.description,
+      amount: o.amount,
+      deliveryDate: o.deliveryDate,
+      status: o.orderStatus,
+    }));
+  }
+
+  async getBuyerOrderHistory(buyerId: string): Promise<{ orderId: string; sellerName: string; description: string; amount: number; deliveryDate: string; status: string }[]> {
+    const db = this.firestoreProvider.getDb();
+    const historyStatuses = ['DELIVERED', 'REFUNDED', 'DECLINED'];
+
+    const snapshots = await Promise.all(
+      historyStatuses.map((status) =>
+        db.collection(this.collection)
+          .where('buyer.id', '==', buyerId)
+          .where('orderStatus', '==', status)
+          .get()
+      )
+    );
+
+    const orders = snapshots.flatMap((snapshot) =>
+      snapshot.docs.map((doc) => doc.data() as CreateOrderDto)
+    );
+
+    if (!orders.length) {
+      throw new NotFoundException(`No order history found for buyer ${buyerId}`);
+    }
+
+    return orders.map((o) => ({
+      orderId: o._id,
+      sellerName: o.seller.name,
+      description: o.description,
+      amount: o.amount,
+      deliveryDate: o.deliveryDate,
+      status: o.orderStatus,
+    }));
+  }
 }

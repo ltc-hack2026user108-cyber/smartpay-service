@@ -27,6 +27,16 @@ export class OrdersController {
     return this.ordersService.getBuyerDashboard(buyerId);
   }
 
+  @Get('buyers/:buyerId/ongoing')
+  async getBuyerOngoingOrders(@Param('buyerId') buyerId: string) {
+    return this.ordersService.getBuyerOngoingOrders(buyerId);
+  }
+
+  @Get('buyers/:buyerId/history')
+  async getBuyerOrderHistory(@Param('buyerId') buyerId: string) {
+    return this.ordersService.getBuyerOrderHistory(buyerId);
+  }
+
   @Get('sellers/:sellerId')
   async findBySeller(@Param('sellerId') sellerId: string) {
     return this.ordersService.findBySeller(sellerId);
