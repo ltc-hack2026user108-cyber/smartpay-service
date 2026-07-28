@@ -32,6 +32,26 @@ export class OrdersController {
     return this.ordersService.findBySeller(sellerId);
   }
 
+  @Get('sellers/:sellerId/dashboard')
+  async getSellerDashboard(@Param('sellerId') sellerId: string) {
+    return this.ordersService.getSellerDashboard(sellerId);
+  }
+
+  @Get('sellers/:sellerId/pending')
+  async getPendingOrders(@Param('sellerId') sellerId: string) {
+    return this.ordersService.getPendingOrders(sellerId);
+  }
+
+  @Get('sellers/:sellerId/accepted')
+  async getAcceptedOrders(@Param('sellerId') sellerId: string) {
+    return this.ordersService.getAcceptedOrders(sellerId);
+  }
+
+  @Get('sellers/:sellerId/history')
+  async getOrderHistory(@Param('sellerId') sellerId: string) {
+    return this.ordersService.getOrderHistory(sellerId);
+  }
+
   @Post(':id/accept')
   async acceptOrder(@Param('id') id: string) {
     return this.ordersService.updateOrderStatus(id, 'ACCEPTED');
