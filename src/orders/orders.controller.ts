@@ -76,4 +76,9 @@ export class OrdersController {
   async findOne(@Param('id') id: string) {
     return this.ordersService.findOne(id);
   }
+  @Post(':id/simulate-status')
+  @HttpCode(HttpStatus.OK)
+  async simulateStatus(@Param('id') id: string, @Body('status') status: string) {
+    return this.ordersService.simulateStatus(id, status);
+  }
 }
