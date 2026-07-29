@@ -22,27 +22,28 @@ export class OrdersService {
       throw new ConflictException(`Order ${dto._id} already exists`);
     }
 
-    // 1. Build and save the order (no Shippo tracker yet — created on ACCEPTED)
-    const createdTimestamp = new Date().toISOString();
+    // 1. Create tracker via ShippoService with valid Shippo test tracking number
+    const initialTrackingNumber = 'SHIPPO_TRANSIT';
+    const tracker = await this.shippoService.createTracker(initialTrackingNumber, 'shippo');
+
+    // 2. Build the order with tracking details inside shippoDetails object
     const orderData: CreateOrderDto = {
       ...dto,
+      shippoDetails: {
+        trackerId: tracker.id,
+        trackingCode: tracker.trackingNumber,
+        carrier: tracker.carrier,
+      },
       orderStatus: dto.orderStatus || OrderStatus.CREATED,
-      timeline: [
-        ...(dto.timeline || []),
-        {
-          status: OrderStatus.CREATED,
-          label: this.getStatusLabel(OrderStatus.CREATED),
-          timestamp: createdTimestamp,
-        },
-      ],
-      createdAt: dto.createdAt || createdTimestamp,
-      updatedAt: createdTimestamp,
+      timeline: dto.timeline || [],
+      createdAt: dto.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     await docRef.set(orderData);
-    this.logger.log(`Order ${dto._id} saved to Firestore`);
+    this.logger.log(`Order ${dto._id} saved to Firestore with Shippo Tracker: ${tracker.id}`);
 
-    // 2. Trigger GCUL smart contract createOrder (Buyer -> Escrow transfer)
+    // Trigger GCUL smart contract createOrder (Buyer -> Escrow transfer)
     try {
       const buyerAccountId: string = dto.buyer?.gculAccountId ?? process.env.GCUL_BUYER_ACCOUNT_ID ?? '';
       if (buyerAccountId) {
@@ -52,7 +53,26 @@ export class OrdersService {
       this.logger.error(`GCUL createOrder failed for order ${dto._id}: ${gculError.message}`);
     }
 
-    // 3. Retrieve and return the saved order
+    // 3. Immediately trigger a simulated Shippo webhook to set status to 'SHIPPED'
+    try {
+      await this.handleShippoWebhook({
+        event: 'track_updated',
+        data: {
+          id: tracker.id,
+          tracking_number: tracker.trackingNumber,
+          carrier: tracker.carrier,
+          status: 'SHIPPED',
+          tracking_status: {
+            status: 'SHIPPED',
+            status_details: 'Package received by carrier / shipped',
+          },
+        },
+      });
+    } catch (webhookError: any) {
+      this.logger.error(`Initial webhook trigger failed for order ${dto._id}: ${webhookError.message}`);
+    }
+
+    // 4. Retrieve and return the updated order
     const updatedDoc = await docRef.get();
     const finalOrder = updatedDoc.data() as CreateOrderDto;
 
@@ -253,7 +273,7 @@ export class OrdersService {
     return snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
   }
 
-  async getBuyerDashboard(buyerId: string): Promise<{ activeOrders: number; deliveredOrders: number; incompleteOrders: number; availableBalance: number | null }> {
+  async getBuyerDashboard(buyerId: string): Promise<{ activeOrders: number; deliveredOrders: number; incompleteOrders: number; availableBalance: number }> {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection).where('buyer.id', '==', buyerId).get();
     console.log('snapshot empty', snapshot);
@@ -265,20 +285,11 @@ export class OrdersService {
     console.log('orders', orders);
     const activeStatuses = ['ORDER_CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
     const deliveredStatuses = ['DELIVERED'];
-    const incompleteStatuses = ['REFUNDED', 'DECLINED', 'FAILED'];
+    const incompleteStatuses = ['REFUNDED','DECLINED', 'FAILED'];
 
-    // Fetch real GCUL balance for the buyer
-    let availableBalance: number | null = null;
-    const firstOrder = orders[0];
-    const gculAccountId = firstOrder?.buyer?.gculAccountId;
-    if (gculAccountId) {
-      try {
-        const balanceResult = await this.gculService.queryBalance(gculAccountId);
-        availableBalance = balanceResult.balance;
-      } catch (err: any) {
-        this.logger.error(`Failed to fetch GCUL balance for buyer ${gculAccountId}: ${err.message}`);
-      }
-    }
+    const availableBalance = orders
+      .filter((o) => !activeStatuses.includes(o.orderStatus))
+      .reduce((sum, o) => sum + o.amount, 0);
 
     return {
       activeOrders: orders.filter((o) => activeStatuses.includes(o.orderStatus)).length,
@@ -300,74 +311,13 @@ export class OrdersService {
     await docRef.update({ orderStatus: status, updatedAt: new Date().toISOString() });
     this.logger.log(`Order ${id} status updated to ${status}`);
 
-    if (status === 'ACCEPTED') {
-      // Create Shippo tracker and fire SHIPPED webhook now that seller has accepted
-      try {
-        const tracker = await this.shippoService.createTracker('SHIPPO_TRANSIT', 'shippo');
-        await docRef.update({
-          shippoDetails: {
-            trackerId: tracker.id,
-            trackingCode: tracker.trackingNumber,
-            carrier: tracker.carrier,
-          },
-          updatedAt: new Date().toISOString(),
-        });
-        this.logger.log(`Order ${id} Shippo tracker created: ${tracker.id}`);
-
-        await this.handleShippoWebhook({
-          event: 'track_updated',
-          data: {
-            id: tracker.id,
-            tracking_number: tracker.trackingNumber,
-            carrier: tracker.carrier,
-            status: 'SHIPPED',
-            tracking_status: {
-              status: 'SHIPPED',
-              status_details: 'Package received by carrier / shipped',
-            },
-          },
-        });
-      } catch (shippoError: any) {
-        this.logger.error(`Shippo tracker creation failed for accepted order ${id}: ${shippoError.message}`);
-      }
-    }
-
     if (status === 'DECLINED') {
-      const order = doc.data() as CreateOrderDto;
-      const now = new Date().toISOString();
-      const updatedTimeline = [
-        ...(order.timeline || []),
-        {
-          status: OrderStatus.DECLINED,
-          label: this.getStatusLabel(OrderStatus.DECLINED),
-          timestamp: now,
-        },
-      ];
-
-      // Update timeline with DECLINED first
-      await docRef.update({ timeline: updatedTimeline, updatedAt: now });
-
-      // Trigger GCUL refund
       try {
+        const order = doc.data() as CreateOrderDto;
         await this.gculService.refundAmount(order._id, order.amount, order.buyer);
       } catch (err: any) {
         this.logger.error(`GCUL refundAmount failed for declined order ${id}: ${err.message}`);
       }
-
-      // Append REFUNDED to timeline and set final status
-      const refundedTimeline = [
-        ...updatedTimeline,
-        {
-          status: OrderStatus.REFUNDED,
-          label: this.getStatusLabel(OrderStatus.REFUNDED),
-          timestamp: new Date().toISOString(),
-        },
-      ];
-      await docRef.set(
-        { orderStatus: OrderStatus.REFUNDED, timeline: refundedTimeline, updatedAt: new Date().toISOString() },
-        { merge: true },
-      );
-      this.logger.log(`Order ${id} timeline updated with DECLINED and REFUNDED`);
     }
 
     return { message: `Order ${status.toLowerCase()} successfully`, orderId: id, orderStatus: status };
@@ -397,9 +347,8 @@ export class OrdersService {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection)
       .where('seller.id', '==', sellerId)
-      .where('orderStatus', '==', 'ORDER_CREATED')
+      .where('orderStatus', '==', 'CREATED')
       .get();
-
     if (snapshot.empty) {
       throw new NotFoundException(`No pending orders found for seller ${sellerId}`);
     }
@@ -480,7 +429,7 @@ export class OrdersService {
 
   async getBuyerOngoingOrders(buyerId: string): Promise<{ orderId: string; sellerName: string; description: string; amount: number; deliveryDate: string; status: string }[]> {
     const db = this.firestoreProvider.getDb();
-    const ongoingStatuses = ['ORDER_CREATED', 'IN_TRANSIT', 'SHIPPED'];
+    const ongoingStatuses = ['CREATED', 'IN_TRANSIT', 'SHIPPED'];
 
     const snapshots = await Promise.all(
       ongoingStatuses.map((status) =>
@@ -525,7 +474,6 @@ export class OrdersService {
     const orders = snapshots.flatMap((snapshot) =>
       snapshot.docs.map((doc) => doc.data() as CreateOrderDto)
     );
-
     if (!orders.length) {
       throw new NotFoundException(`No order history found for buyer ${buyerId}`);
     }
