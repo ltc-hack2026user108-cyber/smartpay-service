@@ -273,7 +273,7 @@ export class OrdersService {
     return snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
   }
 
-  async getBuyerDashboard(buyerId: string): Promise<{ activeOrders: number; deliveredOrders: number; incompleteOrders: number; availableBalance: number }> {
+  async getBuyerDashboard(buyerId: string): Promise<{ activeOrders: number; deliveredOrders: number; incompleteOrders: number; availableBalance: number | null }> {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection).where('buyer.id', '==', buyerId).get();
     console.log('snapshot empty', snapshot);
@@ -285,11 +285,20 @@ export class OrdersService {
     console.log('orders', orders);
     const activeStatuses = ['ORDER_CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
     const deliveredStatuses = ['DELIVERED'];
-    const incompleteStatuses = ['REFUNDED','DECLINED', 'FAILED'];
+    const incompleteStatuses = ['REFUNDED', 'DECLINED', 'FAILED'];
 
-    const availableBalance = orders
-      .filter((o) => !activeStatuses.includes(o.orderStatus))
-      .reduce((sum, o) => sum + o.amount, 0);
+    // Fetch real GCUL balance for the buyer
+    let availableBalance: number | null = null;
+    const firstOrder = orders[0];
+    const gculAccountId = firstOrder?.buyer?.gculAccountId;
+    if (gculAccountId) {
+      try {
+        const balanceResult = await this.gculService.queryBalance(gculAccountId);
+        availableBalance = balanceResult.balance;
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch GCUL balance for buyer ${gculAccountId}: ${err.message}`);
+      }
+    }
 
     return {
       activeOrders: orders.filter((o) => activeStatuses.includes(o.orderStatus)).length,
