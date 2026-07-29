@@ -283,7 +283,7 @@ export class OrdersService {
 
     const orders = snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
     console.log('orders', orders);
-    const activeStatuses = ['ORDER_CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
+    const activeStatuses = ['CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
     const deliveredStatuses = ['DELIVERED'];
     const incompleteStatuses = ['REFUNDED','DECLINED', 'FAILED'];
 
@@ -347,7 +347,7 @@ export class OrdersService {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection)
       .where('seller.id', '==', sellerId)
-      .where('orderStatus', '==', 'ORDER_CREATED')
+      .where('orderStatus', '==', 'CREATED')
       .get();
 
     if (snapshot.empty) {
@@ -430,7 +430,7 @@ export class OrdersService {
 
   async getBuyerOngoingOrders(buyerId: string): Promise<{ orderId: string; sellerName: string; description: string; amount: number; deliveryDate: string; status: string }[]> {
     const db = this.firestoreProvider.getDb();
-    const ongoingStatuses = ['ORDER_CREATED', 'IN_TRANSIT', 'SHIPPED'];
+    const ongoingStatuses = ['CREATED', 'IN_TRANSIT', 'SHIPPED'];
 
     const snapshots = await Promise.all(
       ongoingStatuses.map((status) =>
