@@ -2,19 +2,23 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { FirestoreProvider } from '../firestore/firestore.provider';
 import { CreateOrderDto } from '../orders/dto/create-order.dto';
+import { GculService } from '../orders/gcul.service';
 
 @Injectable()
 export class AdminService {
   private readonly collection = 'orders';
   private readonly logger = new Logger(AdminService.name);
 
-  constructor(private readonly firestoreProvider: FirestoreProvider) {}
+  constructor(
+    private readonly firestoreProvider: FirestoreProvider,
+    private readonly gculService: GculService,
+  ) {}
 
   async getDashboardDetails(): Promise<{
     totalBuyers: number;
     totalSellers: number;
     totalOrders: number;
-    escrowBalance: number;
+    escrowBalance: number | null;
     settledAmount: number;
     refundAmount: number;
   }> {
@@ -26,9 +30,17 @@ export class AdminService {
     const uniqueBuyers = new Set(orders.map((o) => o.buyer.id));
     const uniqueSellers = new Set(orders.map((o) => o.seller.id));
 
-    const escrowBalance = orders
-      .filter((o) => o.escrow?.status === 'LOCKED')
-      .reduce((sum, o) => sum + (o.escrow?.lockedAmount || 0), 0);
+    // Fetch real escrow balance from GCUL ledger
+    let escrowBalance: number | null = null;
+    const escrowAccountId = process.env.GCUL_ESCROW_ACCOUNT_ID;
+    if (escrowAccountId) {
+      try {
+        const balanceResult = await this.gculService.queryBalance(escrowAccountId);
+        escrowBalance = balanceResult.balance;
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch GCUL escrow balance: ${err.message}`);
+      }
+    }
 
     const settledAmount = orders
       .filter((o) => o.orderStatus === 'DELIVERED')
@@ -139,17 +151,14 @@ export class AdminService {
     const ledger = [];
     snapshot.docs.forEach((doc) => {
       const o = doc.data() as CreateOrderDto;
-      const buyerHash = crypto.createHash('sha256').update(o.buyer.id).digest('hex').slice(0, 16);
-      const sellerHash = crypto.createHash('sha256').update(o.seller.id).digest('hex').slice(0, 16);
-
       o.timeline
         .filter((t) => t.timestamp !== null)
         .forEach((t) => {
           ledger.push({
             orderId: o._id,
             event: t.label,
-            buyerHash,
-            sellerHash,
+            buyerHash:o.buyer?.gculAccountId ,
+            sellerHash:o.seller?.gculAccountId,
             amount: o.amount,
           });
         });
@@ -158,7 +167,7 @@ export class AdminService {
     return ledger;
   }
 
-  async getAllBuyers(): Promise<{ id: string; name: string; totalOrders: number; availableBalance: number }[]> {
+  async getAllBuyers(): Promise<{ id: string; name: string; totalOrders: number; availableBalance: number | null }[]> {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection).get();
 
@@ -167,25 +176,42 @@ export class AdminService {
     }
 
     const orders = snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
-    const buyerMap = new Map<string, { id: string; name: string; totalOrders: number; availableBalance: number }>();
 
+    // Build unique buyer map (order counts + gculAccountId from first order seen)
+    const buyerMap = new Map<string, { id: string; name: string; totalOrders: number; gculAccountId: string | undefined }>();
     orders.forEach((o) => {
-      const activeStatuses = ['ORDER_CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
-      const lockedAmount = activeStatuses.includes(o.orderStatus) ? 0 : o.amount;
-
       if (buyerMap.has(o.buyer.id)) {
-        const buyer = buyerMap.get(o.buyer.id);
-        buyer.totalOrders += 1;
-        buyer.availableBalance += lockedAmount;
+        buyerMap.get(o.buyer.id).totalOrders += 1;
       } else {
-        buyerMap.set(o.buyer.id, { id: o.buyer.id, name: o.buyer.name, totalOrders: 1, availableBalance: lockedAmount });
+        buyerMap.set(o.buyer.id, {
+          id: o.buyer.id,
+          name: o.buyer.name,
+          totalOrders: 1,
+          gculAccountId: o.buyer?.gculAccountId,
+        });
       }
     });
 
-    return Array.from(buyerMap.values());
+    // Fetch real GCUL balance per unique buyer
+    const results = await Promise.all(
+      Array.from(buyerMap.values()).map(async (buyer) => {
+        let availableBalance: number | null = null;
+        if (buyer.gculAccountId) {
+          try {
+            const balanceResult = await this.gculService.queryBalance(buyer.gculAccountId);
+            availableBalance = balanceResult.balance;
+          } catch (err: any) {
+            this.logger.error(`Failed to fetch GCUL balance for buyer ${buyer.gculAccountId}: ${err.message}`);
+          }
+        }
+        return { id: buyer.id, name: buyer.name, totalOrders: buyer.totalOrders, availableBalance };
+      }),
+    );
+
+    return results;
   }
 
-  async getAllSellers(): Promise<{ id: string; name: string; totalOrders: number; balance: number }[]> {
+  async getAllSellers(): Promise<{ id: string; name: string; totalOrders: number; balance: number | null }[]> {
     const db = this.firestoreProvider.getDb();
     const snapshot = await db.collection(this.collection).get();
 
@@ -194,20 +220,38 @@ export class AdminService {
     }
 
     const orders = snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
-    const sellerMap = new Map<string, { id: string; name: string; totalOrders: number; balance: number }>();
 
+    // Build unique seller map (order counts + gculAccountId from first order seen)
+    const sellerMap = new Map<string, { id: string; name: string; totalOrders: number; gculAccountId: string | undefined }>();
     orders.forEach((o) => {
-      const earnedAmount = o.amount;
-
       if (sellerMap.has(o.seller.id)) {
-        const seller = sellerMap.get(o.seller.id);
-        seller.totalOrders += 1;
-        seller.balance += earnedAmount;
+        sellerMap.get(o.seller.id).totalOrders += 1;
       } else {
-        sellerMap.set(o.seller.id, { id: o.seller.id, name: o.seller.name, totalOrders: 1, balance: earnedAmount });
+        sellerMap.set(o.seller.id, {
+          id: o.seller.id,
+          name: o.seller.name,
+          totalOrders: 1,
+          gculAccountId: o.seller?.gculAccountId,
+        });
       }
     });
 
-    return Array.from(sellerMap.values());
+    // Fetch real GCUL balance per unique seller
+    const results = await Promise.all(
+      Array.from(sellerMap.values()).map(async (seller) => {
+        let balance: number | null = null;
+        if (seller.gculAccountId) {
+          try {
+            const balanceResult = await this.gculService.queryBalance(seller.gculAccountId);
+            balance = balanceResult.balance;
+          } catch (err: any) {
+            this.logger.error(`Failed to fetch GCUL balance for seller ${seller.gculAccountId}: ${err.message}`);
+          }
+        }
+        return { id: seller.id, name: seller.name, totalOrders: seller.totalOrders, balance };
+      }),
+    );
+
+    return results;
   }
 }
