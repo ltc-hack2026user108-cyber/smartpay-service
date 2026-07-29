@@ -13,7 +13,21 @@ process.on('unhandledRejection', (reason) => {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableCors();
+const app = await NestFactory.create(AppModule);
+
+app.enableCors({
+  origin: [
+    'https://smartpay-ui-965836572202.asia-south1.run.app',
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+  ],
+});
+
   const port = process.env.PORT || 8080;
   await app.listen(port);
   console.log(`App running on http://localhost:${port}`);
