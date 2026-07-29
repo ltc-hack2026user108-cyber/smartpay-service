@@ -4,6 +4,7 @@
     "target": "ES2017",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
+    "rootDir": "./src",
     "outDir": "./dist",
     "strict": false,
     "resolveJsonModule": true
