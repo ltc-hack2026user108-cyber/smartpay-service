@@ -24,4 +24,14 @@ export class AdminController {
   async getLedger() {
     return this.adminService.getLedger();
   }
+
+  @Get('buyers')
+  async getAllBuyers() {
+    return this.adminService.getAllBuyers();
+  }
+
+  @Get('sellers')
+  async getAllSellers() {
+    return this.adminService.getAllSellers();
+  }
 }

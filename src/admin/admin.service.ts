@@ -157,4 +157,57 @@ export class AdminService {
 
     return ledger;
   }
+
+  async getAllBuyers(): Promise<{ id: string; name: string; totalOrders: number; availableBalance: number }[]> {
+    const db = this.firestoreProvider.getDb();
+    const snapshot = await db.collection(this.collection).get();
+
+    if (snapshot.empty) {
+      throw new NotFoundException('No orders found');
+    }
+
+    const orders = snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
+    const buyerMap = new Map<string, { id: string; name: string; totalOrders: number; availableBalance: number }>();
+
+    orders.forEach((o) => {
+      const activeStatuses = ['ORDER_CREATED', 'ACCEPTED', 'SHIPPED', 'IN_TRANSIT'];
+      const lockedAmount = activeStatuses.includes(o.orderStatus) ? 0 : o.amount;
+
+      if (buyerMap.has(o.buyer.id)) {
+        const buyer = buyerMap.get(o.buyer.id);
+        buyer.totalOrders += 1;
+        buyer.availableBalance += lockedAmount;
+      } else {
+        buyerMap.set(o.buyer.id, { id: o.buyer.id, name: o.buyer.name, totalOrders: 1, availableBalance: lockedAmount });
+      }
+    });
+
+    return Array.from(buyerMap.values());
+  }
+
+  async getAllSellers(): Promise<{ id: string; name: string; totalOrders: number; balance: number }[]> {
+    const db = this.firestoreProvider.getDb();
+    const snapshot = await db.collection(this.collection).get();
+
+    if (snapshot.empty) {
+      throw new NotFoundException('No orders found');
+    }
+
+    const orders = snapshot.docs.map((doc) => doc.data() as CreateOrderDto);
+    const sellerMap = new Map<string, { id: string; name: string; totalOrders: number; balance: number }>();
+
+    orders.forEach((o) => {
+      const earnedAmount = o.amount;
+
+      if (sellerMap.has(o.seller.id)) {
+        const seller = sellerMap.get(o.seller.id);
+        seller.totalOrders += 1;
+        seller.balance += earnedAmount;
+      } else {
+        sellerMap.set(o.seller.id, { id: o.seller.id, name: o.seller.name, totalOrders: 1, balance: earnedAmount });
+      }
+    });
+
+    return Array.from(sellerMap.values());
+  }
 }

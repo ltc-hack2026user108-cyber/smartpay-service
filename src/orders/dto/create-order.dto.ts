@@ -1,6 +1,7 @@
 export class PartyDto {
   id: string;
   name: string;
+  gculAccountId?: string;
 }
 
 export class EscrowDto {
@@ -15,6 +16,23 @@ export class TimelineEventDto {
   timestamp: string | null;
 }
 
+export class ShippoDetailsDto {
+  trackerId?: string;
+  trackingCode?: string;
+  carrier?: string;
+}
+
+export enum OrderStatus {
+  CREATED = 'CREATED',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  SHIPPED = 'SHIPPED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  DELIVERED = 'DELIVERED',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
+}
+
 export class CreateOrderDto {
   _id: string;
   buyer: PartyDto;
@@ -23,9 +41,10 @@ export class CreateOrderDto {
   amount: number;
   currency: string;
   deliveryDate: string;
-  orderStatus: string;
+  orderStatus: OrderStatus;
   escrow: EscrowDto;
   timeline: TimelineEventDto[];
+  shippoDetails?: ShippoDetailsDto;
   createdAt: string;
   updatedAt: string;
 }
